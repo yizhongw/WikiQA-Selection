@@ -33,7 +33,7 @@ def train_cnn():
         a_length=data_helper.max_a_length,
         word_embeddings=data_helper.embeddings,
         filter_sizes=[2, 3, 4],
-        num_filters=3,
+        num_filters=5,
         margin=1,
         l2_reg_lambda=0
     )
@@ -41,36 +41,39 @@ def train_cnn():
     optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
     train_op = optimizer.minimize(cnn_model.loss)
 
+    checkpoint_dir = os.path.abspath('data/run/checkpoints/')
+    checkpoint_prefix = os.path.join(checkpoint_dir, 'model')
+    saver = tf.train.Saver(tf.all_variables())
+
     with tf.Session() as sess:
         sess.run(tf.initialize_all_variables())
         for epoch in range(50):
+            train_loss = 0
             for batch in data_helper.gen_train_batches(batch_size=2):
                 q_batch, pos_a_batch, neg_a_batch = zip(*batch)
-                sess.run(train_op, feed_dict={cnn_model.question: q_batch,
-                                              cnn_model.pos_answer: pos_a_batch,
-                                              cnn_model.neg_answer: neg_a_batch,
-                                              cnn_model.dropout_keep_prob: 1.0
-                                              })
-            q_train, pos_a_train, neg_a_train = zip(*data_helper.train_triplets)
-            loss = sess.run(cnn_model.loss, feed_dict={cnn_model.question: q_train,
-                                                       cnn_model.pos_answer: pos_a_train,
-                                                       cnn_model.neg_answer: neg_a_train,
-                                                       cnn_model.dropout_keep_prob: 1.0
-                                                       })
-            print('Loss in epoch {}: {}'.format(epoch, loss))
+                _, loss = sess.run([train_op, cnn_model.loss], feed_dict={cnn_model.question: q_batch,
+                                                                          cnn_model.pos_answer: pos_a_batch,
+                                                                          cnn_model.neg_answer: neg_a_batch,
+                                                                          cnn_model.dropout_keep_prob: 1.0
+                                                                          })
+                train_loss += loss
+            print('Loss on train set in epoch {}: {}'.format(epoch, train_loss))
 
             q_dev, q_ans = zip(*data_helper.dev_data)
             similarity_scores = sess.run(cnn_model.pos_similarity, feed_dict={cnn_model.question: q_dev,
-                                                                       cnn_model.pos_answer: q_ans,
-                                                                       cnn_model.neg_answer: q_ans,
-                                                                       cnn_model.dropout_keep_prob: 1.0
-                                                                       })
+                                                                              cnn_model.pos_answer: q_ans,
+                                                                              cnn_model.neg_answer: q_ans,
+                                                                              cnn_model.dropout_keep_prob: 1.0
+                                                                              })
             for sample, similarity_score in zip(data_helper.dev_samples, similarity_scores):
                 sample.score = similarity_score
             with open('data/output/WikiQA-dev-{}.rank'.format(epoch), 'w') as fout:
                 for sample, rank in get_final_rank(data_helper.dev_samples):
                     fout.write('{}\t{}\t{}\n'.format(sample.q_id, sample.a_id, rank))
             os.system('python3 eval.py data/output/WikiQA-dev-{}.rank data/raw/WikiQA-dev.tsv'.format(epoch))
+
+            saver.save(sess, checkpoint_prefix, global_step=epoch)
+            print('Done with model saving.')
 
 
 def parse_args():
