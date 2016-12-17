@@ -2,92 +2,142 @@
 # -*- coding: utf-8 -*-
 # author: Yizhong
 # created_at: 16-12-6 下午2:54
-import random
-import os
+import pickle
+import numpy as np
 from tensorflow.contrib import learn as tf_learn
 
 
-class Sample(object):
-    def __init__(self, q_id, question, a_id, answer, label):
+class QaSample(object):
+    def __init__(self, q_id, question, a_id, answer, label=None, score=0):
         self.q_id = q_id
         self.question = question
         self.a_id = a_id
         self.answer = answer
-        self.label = label
+        self.label = int(label)
+        self.score = float(score)
+
+
+def load_qa_data(fname):
+    with open(fname, 'r') as fin:
+        for line in fin:
+            try:
+                q_id, question, a_id, answer, label = line.strip().split('\t')
+            except ValueError:
+                q_id, question, a_id, answer = line.strip().split('\t')
+                label = 0
+            yield QaSample(q_id, question, a_id, answer, label)
+
+
+def get_final_rank(scored_samples):
+    same_q_samples = []
+    for sample in scored_samples:
+        if len(same_q_samples) == 0 or sample.q_id == same_q_samples[0].q_id:
+            same_q_samples.append(sample)
+        else:
+            sorted_samples = sorted(same_q_samples, key=lambda s: s.score, reverse=True)
+            same_q_samples = [sample]
+            for rank, sample in enumerate(sorted_samples):
+                yield sample, rank
+    if len(same_q_samples) > 0:
+        sorted_samples = sorted(same_q_samples, key=lambda s: s.score, reverse=True)
+        for rank, sample in enumerate(sorted_samples):
+            yield sample, rank
 
 
 class DataHelper(object):
-    def __init__(self, train_file, dev_file, test_file=None):
-        print('Loading data to DataHelper...')
-        self.train_data = list(self.load_qa_data(train_file))
-        self.dev_data = list(self.load_qa_data(dev_file))
+    def __init__(self):
+        self.max_q_length = None
+        self.max_a_length = None
+        self.vocab = None
+        self.embeddings = None
+        self.vocab_processor = None
+        self.train_triplets = None
+        self.dev_samples = None
+        self.dev_data = None
+
+    def build(self, embedding_file, train_file, dev_file, test_file=None):
+        # loading all data
+        train_samples = list(load_qa_data(train_file))
+        dev_samples = list(load_qa_data(dev_file))
         if test_file:
-            self.test_data = list(self.load_qa_data(test_file))
+            test_samples = list(load_qa_data(test_file))
         else:
-            self.test_data = []
+            test_samples = []
+        self.max_q_length = max([len(sample.question.split())
+                                 for sample in train_samples + dev_samples + test_samples if sample.label == 1])
+        self.max_a_length = max([len(sample.answer.split())
+                                 for sample in train_samples + dev_samples + test_samples if sample.label == 1])
+        print('Max question length: {}, max answer length: {}'.format(self.max_q_length, self.max_a_length))
+        self.vocab, self.embeddings = self.load_embeddings(embedding_file, train_samples + dev_samples + test_samples)
+        self.build_vocab_processor(texts=self.vocab, max_length=max(self.max_q_length, self.max_a_length))
+        self.embeddings = np.concatenate(([[0] * self.embeddings.shape[1]], self.embeddings))
 
-        self.qid_to_sample_map = {}
-        for sample in self.train_data:
-            if sample.q_id in self.qid_to_sample_map:
-                self.qid_to_sample_map.append(sample)
-            else:
-                self.qid_to_sample_map = [sample]
+    def save(self, filename):
+        print('Save data_helper to {}'.format(filename))
+        info = {
+            'max_q_length': self.max_q_length,
+            'max_a_length': self.max_a_length,
+            'vocab': self.vocab,
+            'embeddings': self.embeddings,
+            'vocab_processor': self.vocab_processor
+        }
+        with open(filename, 'wb') as fout:
+            pickle.dump(info, fout)
 
-        self.max_q_length = max([len(sample.question) for sample in self.train_data + self.dev_data + self.test_data])
-        self.max_a_length = max([len(sample.answer) for sample in self.train_data + self.dev_data + self.test_data])
+    def restore(self, filename):
+        print('Restore data_helper from {}'.format(filename))
+        with open(filename, 'rb') as fin:
+            info = pickle.load(fin)
+        self.max_q_length = info['max_q_length']
+        self.max_a_length = info['max_a_length']
+        self.vocab = info['vocab']
+        self.embeddings = info['embeddings']
+        self.vocab_processor = info['vocab_processor']
 
-        if os.path.exists('data/run/vocab'):
-            print('Loading DataHelper vocabulary...')
-            self.vocab_processor = tf_learn.preprocessing.VocabularyProcessor.restore('data/run/vocab')
-        else:
-            print('Building DataHelper vocabulary...')
-            self.vocab_processor = self.build_vocab()
-            # self.vocab_processor.save('data/run/vocab')
-        print('Vocabulary size: {}.'.format(len(self.vocab_processor.vocabulary_)))
-
-    def build_vocab(self):
-        vocab_processor = tf_learn.preprocessing.VocabularyProcessor(
-            max_document_length=max(self.max_q_length, self.max_a_length))
-        all_texts = (sample.question + sample.answer for sample in self.train_data + self.dev_data + self.test_data)
-        vocab_processor.fit(all_texts)
-        return vocab_processor
-
-    def gen_train_batches(self, batch_size, num_epochs):
-        for epoch in range(num_epochs):
-            balanced_train_data = list(self.get_balanced_train_data())
-            data_size = len(balanced_train_data)
-            num_batches_per_epoch = int(data_size / batch_size) + 1
-            for batch_num in range(num_batches_per_epoch):
-                start_index = batch_size * batch_num
-                end_index = min(batch_size * batch_num + 1, data_size)
-                sample_batch = balanced_train_data[start_index: end_index]
-                yield self.split_samples(sample_batch)
-
-    def get_dev_data(self):
-        return self.split_samples(self.dev_data)
-
-    def split_samples(self, samples):
-        q_list, a_list, y_list = [], [], []
-        for sample in samples:
-            q_list.append(list(self.vocab_processor.transform(sample.question)))
-            a_list.append(list(self.vocab_processor.transform(sample.answer)))
-            y_list.append(sample.label)
-        return q_list, a_list, y_list
-
-    def get_balanced_train_data(self):
-        for sample in self.train_data:
-            if sample.label == 1:
-                yield sample
-                negative_samples = [it for it in self.qid_to_sample_map[sample.q_id] if it.label == 0]
-                yield negative_samples[random.randint(0, len(negative_samples)-1)]
-
-    @staticmethod
-    def load_qa_data(fname):
-        with open(fname, 'r') as fin:
+    def load_embeddings(self, embedding_file, samples):
+        print('Load embeddings from {}'.format(embedding_file))
+        corpus_words = set([word for sample in samples for word in sample.question.split() + sample.answer.split()])
+        vocab = []
+        embeddings = []
+        with open(embedding_file, 'r') as fin:
             for line in fin:
-                try:
-                    q_id, question, a_id, answer, label = line.strip().split('\t')
-                except ValueError:
-                    q_id, question, a_id, answer = line.strip().split('\t')
-                    label = 0
-                yield Sample(q_id, question, a_id, answer, label)
+                line_info = line.strip().split()
+                word = line_info[0]
+                embedding = [float(val) for val in line_info[1:]]
+                if word in corpus_words:
+                    vocab.append(word)
+                    embeddings.append(embedding)
+        print('Vocabulary size: {}'.format(len(vocab)))
+        return vocab, np.array(embeddings)
+
+    def build_vocab_processor(self, texts, max_length):
+        print('Build vocab_processor')
+        self.vocab_processor = tf_learn.preprocessing.VocabularyProcessor(max_document_length=max_length)
+        self.vocab_processor.fit(texts)
+
+    def gen_train_batches(self, batch_size):
+        data_size = len(self.train_triplets)
+        num_batches = int((data_size - 1) / batch_size) + 1
+        for batch_num in range(num_batches):
+            start_index = batch_size * batch_num
+            end_index = min(batch_size * (batch_num + 1), data_size)
+            batch = self.train_triplets[start_index: end_index]
+            yield batch
+
+    def prepare_train_triplets(self, triplets_file):
+        self.train_triplets = []
+        with open(triplets_file, 'r') as fin:
+            for line in fin:
+                question, pos_ans, neg_ans = line.strip().split('\t')
+                question_ids = list(self.vocab_processor.transform([question]))[0][:self.max_q_length]
+                pos_ans_ids = list(self.vocab_processor.transform([pos_ans]))[0][:self.max_a_length]
+                neg_ans_ids = list(self.vocab_processor.transform([neg_ans]))[0][:self.max_a_length]
+                self.train_triplets.append((question_ids, pos_ans_ids, neg_ans_ids))
+
+    def prepare_dev_data(self, dev_file):
+        self.dev_samples = list(load_qa_data(dev_file))
+        self.dev_data = []
+        for sample in self.dev_samples:
+            question_ids = list(self.vocab_processor.transform([sample.question]))[0][:self.max_q_length]
+            answer_ids = list(self.vocab_processor.transform([sample.answer]))[0][:self.max_a_length]
+            self.dev_data.append((question_ids, answer_ids))

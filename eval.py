@@ -42,7 +42,7 @@ if __name__ == "__main__":
     MAP = 0.0
     MRR = 0.0
     for q_id in dic:
-        sort_rank = sorted(dic[q_id].iteritems(), key=lambda asd: asd[1][1], reverse=False)
+        sort_rank = sorted(dic[q_id].items(), key=lambda asd: asd[1][1], reverse=False)
         correct = 0
         total = 0
         AP = 0.0
