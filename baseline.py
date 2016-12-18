@@ -15,7 +15,7 @@ def word_matching_rank(test_file, output_file):
         q_words = [word for word in sample.question.split() if word not in puncts and word not in stop_words]
         a_words = [word for word in sample.answer.split() if word not in puncts and word not in stop_words]
         cooccur_cnt = sum([word in q_words for word in a_words])
-        sample.score = 0
+        sample.score = cooccur_cnt
     with open(output_file, 'w') as fout:
         for sample, rank in get_final_rank(samples):
             fout.write('{}\t{}\t{}\n'.format(sample.q_id, sample.a_id, rank))
@@ -28,4 +28,4 @@ def do_nothing(test_file, output_file):
             fout.write('{}\t{}\t{}\n'.format(sample.q_id, sample.a_id, rank))
 
 if __name__ == '__main__':
-    do_nothing('data/lemmatized/WikiQA-test.tsv', 'data/output/WikiQA-test.rank')
+    word_matching_rank('data/lemmatized/WikiQA-test.tsv', 'data/output/WikiQA-test.rank')

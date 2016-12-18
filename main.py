@@ -2,13 +2,12 @@
 # -*- coding: utf-8 -*-
 # author: Yizhong
 # created_at: 16-12-6 下午2:54
-import os
 import argparse
-import numpy as np
 import tensorflow as tf
 from cnn import QaCNN
 from data_helper import DataHelper
 from data_helper import get_final_rank
+from eval import eval_map_mrr
 
 embedding_file = 'data/embeddings/glove.6B.300d.txt'
 train_file = 'data/lemmatized/WikiQA-train.tsv'
@@ -28,52 +27,67 @@ def train_cnn():
     data_helper.restore('data/model/data_helper_info.bin')
     data_helper.prepare_train_triplets('data/lemmatized/WikiQA-train-triplets.tsv')
     data_helper.prepare_dev_data('data/lemmatized/WikiQA-dev.tsv')
+    data_helper.prepare_test_data('data/lemmatized/WikiQA-test.tsv')
     cnn_model = QaCNN(
         q_length=data_helper.max_q_length,
         a_length=data_helper.max_a_length,
         word_embeddings=data_helper.embeddings,
-        filter_sizes=[2, 3, 4],
-        num_filters=5,
-        margin=1,
+        filter_sizes=[1, 2, 3, 5, 7, 9],
+        num_filters=128,
+        margin=0.25,
         l2_reg_lambda=0
     )
 
-    optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
-    train_op = optimizer.minimize(cnn_model.loss)
+    global_step = tf.Variable(0, name='global_step', trainable=False)
 
-    checkpoint_dir = os.path.abspath('data/run/checkpoints/')
-    checkpoint_prefix = os.path.join(checkpoint_dir, 'model')
-    saver = tf.train.Saver(tf.all_variables())
+    optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
+    train_op = optimizer.minimize(cnn_model.loss, global_step=global_step)
 
     with tf.Session() as sess:
-        sess.run(tf.initialize_all_variables())
+        sess.run(tf.global_variables_initializer())
         for epoch in range(50):
             train_loss = 0
-            for batch in data_helper.gen_train_batches(batch_size=2):
+            for batch in data_helper.gen_train_batches(batch_size=15):
                 q_batch, pos_a_batch, neg_a_batch = zip(*batch)
                 _, loss = sess.run([train_op, cnn_model.loss], feed_dict={cnn_model.question: q_batch,
                                                                           cnn_model.pos_answer: pos_a_batch,
                                                                           cnn_model.neg_answer: neg_a_batch,
-                                                                          cnn_model.dropout_keep_prob: 1.0
                                                                           })
                 train_loss += loss
-            print('Loss on train set in epoch {}: {}'.format(epoch, train_loss))
 
-            q_dev, q_ans = zip(*data_helper.dev_data)
-            similarity_scores = sess.run(cnn_model.pos_similarity, feed_dict={cnn_model.question: q_dev,
-                                                                              cnn_model.pos_answer: q_ans,
-                                                                              cnn_model.neg_answer: q_ans,
-                                                                              cnn_model.dropout_keep_prob: 1.0
-                                                                              })
-            for sample, similarity_score in zip(data_helper.dev_samples, similarity_scores):
-                sample.score = similarity_score
-            with open('data/output/WikiQA-dev-{}.rank'.format(epoch), 'w') as fout:
-                for sample, rank in get_final_rank(data_helper.dev_samples):
-                    fout.write('{}\t{}\t{}\n'.format(sample.q_id, sample.a_id, rank))
-            os.system('python3 eval.py data/output/WikiQA-dev-{}.rank data/raw/WikiQA-dev.tsv'.format(epoch))
+                cur_step = tf.train.global_step(sess, global_step)
+                if cur_step % 10 == 0:
+                    # print('Loss: {}'.format(train_loss))
+                    # test on dev set
+                    q_dev, ans_dev = zip(*data_helper.dev_data)
+                    similarity_scores = sess.run(cnn_model.pos_similarity, feed_dict={cnn_model.question: q_dev,
+                                                                                      cnn_model.pos_answer: ans_dev,
+                                                                                      cnn_model.neg_answer: ans_dev,
+                                                                                      })
+                    for sample, similarity_score in zip(data_helper.dev_samples, similarity_scores):
+                        sample.score = similarity_score
+                    with open('data/output/WikiQA-dev.rank'.format(epoch), 'w') as fout:
+                        for sample, rank in get_final_rank(data_helper.dev_samples):
+                            fout.write('{}\t{}\t{}\n'.format(sample.q_id, sample.a_id, rank))
+                    dev_MAP, dev_MRR = eval_map_mrr('data/output/WikiQA-dev.rank'.format(epoch), 'data/raw/WikiQA-dev.tsv')
+                    # print('Dev MAP: {}, MRR: {}'.format(dev_MAP, dev_MRR))
 
-            saver.save(sess, checkpoint_prefix, global_step=epoch)
-            print('Done with model saving.')
+                    # test on test set
+                    q_test, ans_test = zip(*data_helper.test_data)
+                    similarity_scores = sess.run(cnn_model.pos_similarity, feed_dict={cnn_model.question: q_test,
+                                                                                      cnn_model.pos_answer: ans_test,
+                                                                                      cnn_model.neg_answer: ans_test,
+                                                                                      })
+                    for sample, similarity_score in zip(data_helper.test_samples, similarity_scores):
+                        # print('{}\t{}\t{}'.format(sample.q_id, sample.a_id, similarity_score))
+                        sample.score = similarity_score
+                    with open('data/output/WikiQA-test.rank', 'w') as fout:
+                        for sample, rank in get_final_rank(data_helper.test_samples):
+                            fout.write('{}\t{}\t{}\n'.format(sample.q_id, sample.a_id, rank))
+                    test_MAP, test_MRR = eval_map_mrr('data/output/WikiQA-test.rank'.format(epoch), 'data/raw/WikiQA-test-gold.tsv')
+                    # print('Test MAP: {}, MRR: {}'.format(test_MAP, test_MRR))
+                    print('{}\t{}\t{}\t{}\t{}\t{}\t{}'.format(epoch, cur_step, train_loss, dev_MAP, dev_MRR, test_MAP, test_MRR))
+                    train_loss = 0
 
 
 def parse_args():
@@ -90,70 +104,3 @@ if __name__ == '__main__':
         prepare_helper()
     if args.train:
         train_cnn()
-
-
-
-
-# with tf.Graph().as_default():
-#     sess_config = tf.ConfigProto(allow_soft_placement=True, log_device_placement=True)
-#     with tf.Session(config=sess_config) as sess:
-#
-#         model = QaCNN(n_class=2, q_length=data_helper.max_q_length, a_length=data_helper.max_a_length)
-#
-#         global_step = tf.Variable(0, name='global_step', trainable=False)
-#         optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
-#         grads_and_vars = optimizer.compute_gradients(model.loss)
-#         train_op = optimizer.apply_gradients(grads_and_vars, global_step)
-#
-#         loss_summary = tf.scalar_summary('loss', model.loss)
-#         acc_summary = tf.scalar_summary('accuracy', model.accuracy)
-#
-#         train_summary_op = tf.merge_summary([loss_summary, acc_summary])
-#         train_summary_writer = tf.train.SummaryWriter('data/run/summaries/train', sess.graph)
-#
-#         dev_summary_op = tf.merge_summary([loss_summary, acc_summary])
-#         dev_summary_writer = tf.train.SummaryWriter('data/run/summaries/dev', sess.graph)
-#
-#         checkpoint_dir = os.path.abspath('data/run/checkpoints/')
-#         checkpoint_prefix = os.path.join(checkpoint_dir, 'model')
-#         saver = tf.train.Saver(tf.all_variables())
-#
-#         sess.run(tf.initialize_all_variables())
-#
-#         def train_step(q_batch, a_batch, y_batch):
-#             feed_dict = {
-#                 model.input_q: q_batch,
-#                 model.input_a: a_batch,
-#                 model.input_y: y_batch
-#             }
-#             _, step, summaries, loss, accuracy = sess.run(
-#                 [train_op, global_step, train_summary_op, model.loss, model.accuracy],
-#                 feed_dict=feed_dict
-#             )
-#             print('Step {}: loss {}, acc {}.'.format(step, loss, accuracy))
-#             train_summary_writer.add_summary(summaries, step)
-#
-#         def dev_step(q_dev, a_dev, y_dev):
-#             feed_dict = {
-#                 model.input_q: q_dev,
-#                 model.input_a: a_dev,
-#                 model.input_y: y_dev
-#             }
-#             step, summaries, loss, accuracy = sess.run(
-#                 [global_step, dev_summary_op, model.loss, model.accuracy],
-#                 feed_dict=feed_dict
-#             )
-#             print('Step {}: loss {}, acc {}.'.format(step, loss, accuracy))
-#             dev_summary_writer.add_summary(summaries, step)
-#
-#         train_batches = data_helper.gen_train_batches(batch_size=10, num_epochs=5)
-#         q_dev, a_dev, y_dev = data_helper.get_dev_data()
-#         for q_batch, a_batch, y_batch in train_batches:
-#             train_step(q_batch, a_batch, y_batch)
-#             cur_step = tf.train.global_step(sess, global_step)
-#             if cur_step % 100 == 0:
-#                 print('Evaluation:')
-#                 dev_step(q_dev, a_dev, y_dev)
-#             if cur_step % 1000 == 0:
-#                 path = saver.save(sess, checkpoint_prefix, global_step=cur_step)
-#                 print('Done with model checkpoint saving.')

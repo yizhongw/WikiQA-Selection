@@ -11,7 +11,6 @@ class QaCNN(object):
         self.question = tf.placeholder(tf.int32, [None, q_length], name='question')
         self.pos_answer = tf.placeholder(tf.int32, [None, a_length], name='pos_answer')
         self.neg_answer = tf.placeholder(tf.int32, [None, a_length], name='neg_answer')
-        self.dropout_keep_prob = tf.placeholder(tf.float32, name='dropout_keep_prob')
 
         l2_reg_loss = tf.constant(0.0)
 
@@ -79,6 +78,6 @@ class QaCNN(object):
             self.neg_similarity = tf.reduce_sum(tf.mul(normalized_q_h_pool, normalized_neg_h_pool), 1)
 
         with tf.name_scope('loss'):
-            original_loss = tf.reduce_mean(margin - self.pos_similarity + self.neg_similarity)
+            original_loss = tf.reduce_sum(margin - self.pos_similarity + self.neg_similarity)
             self.loss = tf.cond(tf.less(0.0, original_loss), lambda: original_loss, lambda: tf.constant(0.0))
 

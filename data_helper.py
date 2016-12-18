@@ -29,19 +29,23 @@ def load_qa_data(fname):
 
 
 def get_final_rank(scored_samples):
+    sample_final_rank = []
     same_q_samples = []
     for sample in scored_samples:
         if len(same_q_samples) == 0 or sample.q_id == same_q_samples[0].q_id:
             same_q_samples.append(sample)
         else:
             sorted_samples = sorted(same_q_samples, key=lambda s: s.score, reverse=True)
+            sample_rank_map = {sample: rank for rank, sample in enumerate(sorted_samples)}
+            for same_q_sample in same_q_samples:
+                sample_final_rank.append((same_q_sample, sample_rank_map[same_q_sample]))
             same_q_samples = [sample]
-            for rank, sample in enumerate(sorted_samples):
-                yield sample, rank
     if len(same_q_samples) > 0:
         sorted_samples = sorted(same_q_samples, key=lambda s: s.score, reverse=True)
-        for rank, sample in enumerate(sorted_samples):
-            yield sample, rank
+        sample_rank_map = {sample: rank for rank, sample in enumerate(sorted_samples)}
+        for same_q_sample in same_q_samples:
+            sample_final_rank.append((same_q_sample, sample_rank_map[same_q_sample]))
+    return sample_final_rank
 
 
 class DataHelper(object):
@@ -54,6 +58,8 @@ class DataHelper(object):
         self.train_triplets = None
         self.dev_samples = None
         self.dev_data = None
+        self.test_samples = None
+        self.test_data = None
 
     def build(self, embedding_file, train_file, dev_file, test_file=None):
         # loading all data
@@ -101,12 +107,16 @@ class DataHelper(object):
         embeddings = []
         with open(embedding_file, 'r') as fin:
             for line in fin:
-                line_info = line.strip().split()
-                word = line_info[0]
-                embedding = [float(val) for val in line_info[1:]]
-                if word in corpus_words:
-                    vocab.append(word)
-                    embeddings.append(embedding)
+                try:
+                    line_info = line.strip().split()
+                    word = line_info[0]
+                    embedding = [float(val) for val in line_info[1:]]
+                    if word in corpus_words:
+                        vocab.append(word)
+                        embeddings.append(embedding)
+                except:
+                    # print('Error while loading line: {}'.format(line.strip()))
+                    pass
         print('Vocabulary size: {}'.format(len(vocab)))
         return vocab, np.array(embeddings)
 
@@ -141,3 +151,11 @@ class DataHelper(object):
             question_ids = list(self.vocab_processor.transform([sample.question]))[0][:self.max_q_length]
             answer_ids = list(self.vocab_processor.transform([sample.answer]))[0][:self.max_a_length]
             self.dev_data.append((question_ids, answer_ids))
+
+    def prepare_test_data(self, test_file):
+        self.test_samples = list(load_qa_data(test_file))
+        self.test_data = []
+        for sample in self.test_samples:
+            question_ids = list(self.vocab_processor.transform([sample.question]))[0][:self.max_q_length]
+            answer_ids = list(self.vocab_processor.transform([sample.answer]))[0][:self.max_a_length]
+            self.test_data.append((question_ids, answer_ids))

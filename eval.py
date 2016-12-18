@@ -1,15 +1,8 @@
 import sys
 
-if __name__ == "__main__":
-    
-    if len(sys.argv) != 3:
-        print("Usage: python eval.py <your_predict_file> <origin_data_file>")
-        exit(0)
-    
-    answer_file = sys.argv[1]
-    gold_file = sys.argv[2]
-    dic = {}
 
+def eval_map_mrr(answer_file, gold_file):
+    dic = {}
     fin = open(gold_file)
     for line in fin:
         line = line.strip()
@@ -21,10 +14,10 @@ if __name__ == "__main__":
 
         q_id = cols[0]
         a_id = cols[4]
-        
+
         if not q_id in dic:
             dic[q_id] = {}
-        dic[q_id][a_id] = [cols[6],-1]
+        dic[q_id][a_id] = [cols[6], -1]
     fin.close()
 
     fin = open(answer_file)
@@ -62,7 +55,4 @@ if __name__ == "__main__":
 
     MAP /= float(len(dic))
     MRR /= float(len(dic))
-    print("Final Evaluation Score:")
-    print("MAP:", MAP)
-    print("MRR", MRR)
-    exit(0)
+    return MAP, MRR
