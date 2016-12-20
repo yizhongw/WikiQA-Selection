@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 # author: Yizhong
 # created_at: 16-12-6 下午2:54
+
+import os
 import argparse
 import tensorflow as tf
 from cnn import QaCNN
@@ -43,19 +45,27 @@ def train_cnn():
     optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
     train_op = optimizer.minimize(cnn_model.loss, global_step=global_step)
 
+    checkpoint_dir = os.path.abspath('data/model/checkpoints')
+    checkpoint_model_path = os.path.join(checkpoint_dir, 'model.ckpt')
+    if not os.path.exists(checkpoint_dir):
+        os.mkdir(checkpoint_dir)
+    saver = tf.train.Saver()
+
     with tf.Session() as sess:
+        summary_writer = tf.train.SummaryWriter('data/model/summary', sess.graph)
         sess.run(tf.global_variables_initializer())
-        for epoch in range(50):
+        for epoch in range(3):
             train_loss = 0
             for batch in data_helper.gen_train_batches(batch_size=15):
                 q_batch, pos_a_batch, neg_a_batch = zip(*batch)
-                _, loss = sess.run([train_op, cnn_model.loss], feed_dict={cnn_model.question: q_batch,
-                                                                          cnn_model.pos_answer: pos_a_batch,
-                                                                          cnn_model.neg_answer: neg_a_batch,
-                                                                          })
+                _, loss, summaries = sess.run([train_op, cnn_model.loss, cnn_model.summary_op],
+                                              feed_dict={cnn_model.question: q_batch,
+                                                          cnn_model.pos_answer: pos_a_batch,
+                                                          cnn_model.neg_answer: neg_a_batch,
+                                                          })
                 train_loss += loss
-
                 cur_step = tf.train.global_step(sess, global_step)
+                summary_writer.add_summary(summaries, cur_step)
                 if cur_step % 10 == 0:
                     # print('Loss: {}'.format(train_loss))
                     # test on dev set
@@ -70,24 +80,43 @@ def train_cnn():
                         for sample, rank in get_final_rank(data_helper.dev_samples):
                             fout.write('{}\t{}\t{}\n'.format(sample.q_id, sample.a_id, rank))
                     dev_MAP, dev_MRR = eval_map_mrr('data/output/WikiQA-dev.rank'.format(epoch), 'data/raw/WikiQA-dev.tsv')
-                    # print('Dev MAP: {}, MRR: {}'.format(dev_MAP, dev_MRR))
-
-                    # test on test set
-                    q_test, ans_test = zip(*data_helper.test_data)
-                    similarity_scores = sess.run(cnn_model.pos_similarity, feed_dict={cnn_model.question: q_test,
-                                                                                      cnn_model.pos_answer: ans_test,
-                                                                                      cnn_model.neg_answer: ans_test,
-                                                                                      })
-                    for sample, similarity_score in zip(data_helper.test_samples, similarity_scores):
-                        # print('{}\t{}\t{}'.format(sample.q_id, sample.a_id, similarity_score))
-                        sample.score = similarity_score
-                    with open('data/output/WikiQA-test.rank', 'w') as fout:
-                        for sample, rank in get_final_rank(data_helper.test_samples):
-                            fout.write('{}\t{}\t{}\n'.format(sample.q_id, sample.a_id, rank))
-                    test_MAP, test_MRR = eval_map_mrr('data/output/WikiQA-test.rank'.format(epoch), 'data/raw/WikiQA-test-gold.tsv')
-                    # print('Test MAP: {}, MRR: {}'.format(test_MAP, test_MRR))
-                    print('{}\t{}\t{}\t{}\t{}\t{}\t{}'.format(epoch, cur_step, train_loss, dev_MAP, dev_MRR, test_MAP, test_MRR))
+                    print('Dev MAP: {}, MRR: {}'.format(dev_MAP, dev_MRR))
+                    # print('{}\t{}\t{}\t{}\t{}\t{}\t{}'.format(epoch, cur_step, train_loss, dev_MAP, dev_MRR, test_MAP, test_MRR))
                     train_loss = 0
+            print('Saving model for epoch {}'.format(epoch))
+            saver.save(sess, checkpoint_model_path, global_step=epoch)
+
+
+def gen_rank_for_test(checkpoint_model_path):
+    data_helper = DataHelper()
+    data_helper.restore('data/model/data_helper_info.bin')
+    data_helper.prepare_test_data('data/lemmatized/WikiQA-test.tsv')
+    cnn_model = QaCNN(
+        q_length=data_helper.max_q_length,
+        a_length=data_helper.max_a_length,
+        word_embeddings=data_helper.embeddings,
+        filter_sizes=[1, 2, 3, 5, 7, 9],
+        num_filters=128,
+        margin=0.25,
+        l2_reg_lambda=0
+    )
+    saver = tf.train.Saver()
+    with tf.Session() as sess:
+        saver.restore(sess, checkpoint_model_path)
+        # test on test set
+        q_test, ans_test = zip(*data_helper.test_data)
+        similarity_scores = sess.run(cnn_model.pos_similarity, feed_dict={cnn_model.question: q_test,
+                                                                          cnn_model.pos_answer: ans_test,
+                                                                          cnn_model.neg_answer: ans_test,
+                                                                          })
+        for sample, similarity_score in zip(data_helper.test_samples, similarity_scores):
+            # print('{}\t{}\t{}'.format(sample.q_id, sample.a_id, similarity_score))
+            sample.score = similarity_score
+        with open('data/output/WikiQA-test.rank', 'w') as fout:
+            for sample, rank in get_final_rank(data_helper.test_samples):
+                fout.write('{}\t{}\t{}\n'.format(sample.q_id, sample.a_id, rank))
+        test_MAP, test_MRR = eval_map_mrr('data/output/WikiQA-test.rank', 'data/raw/WikiQA-test-gold.tsv')
+        print('Test MAP: {}, MRR: {}'.format(test_MAP, test_MRR))
 
 
 def parse_args():
@@ -104,3 +133,6 @@ if __name__ == '__main__':
         prepare_helper()
     if args.train:
         train_cnn()
+    if args.test:
+        checkpoint_num = 2
+        gen_rank_for_test(checkpoint_model_path='data/model/checkpoints/model.ckpt-{}'.format(checkpoint_num))

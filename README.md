@@ -45,6 +45,10 @@ The quality of the rank is evaluated by MRR and MAP, as implemented in `eval.py`
     * Generate the final rank for test data: 
     
         ```python3 main.py --test```
+        
+    * Visualize the train loss and graph:
+    
+        ```python3 -m tensorflow.tensorboard --logdir data/model/summary/```
     
     
     

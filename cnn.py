@@ -81,3 +81,6 @@ class QaCNN(object):
             original_loss = tf.reduce_sum(margin - self.pos_similarity + self.neg_similarity)
             self.loss = tf.cond(tf.less(0.0, original_loss), lambda: original_loss, lambda: tf.constant(0.0))
 
+        loss_summary = tf.scalar_summary('loss', self.loss)
+        self.summary_op = tf.merge_all_summaries()
+

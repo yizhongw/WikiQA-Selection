@@ -1,5 +1,4 @@
 data/embeddings/*
 data/lemmatized/*
-data/model/*
 .idea
 __pycache__

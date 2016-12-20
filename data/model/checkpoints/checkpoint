@@ -1,0 +1,4 @@
+model_checkpoint_path: "/home/yizhong/Workspace/WikiQA/data/model/checkpoints/model.ckpt-2"
+all_model_checkpoint_paths: "/home/yizhong/Workspace/WikiQA/data/model/checkpoints/model.ckpt-0"
+all_model_checkpoint_paths: "/home/yizhong/Workspace/WikiQA/data/model/checkpoints/model.ckpt-1"
+all_model_checkpoint_paths: "/home/yizhong/Workspace/WikiQA/data/model/checkpoints/model.ckpt-2"
