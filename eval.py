@@ -56,3 +56,7 @@ def eval_map_mrr(answer_file, gold_file):
     MAP /= float(len(dic))
     MRR /= float(len(dic))
     return MAP, MRR
+
+if __name__ == '__main__':
+    MAP, MRR = eval_map_mrr(sys.argv[1], sys.argv[2])
+    print('MAP: {}, MRR: {}'.format(MAP, MRR))
