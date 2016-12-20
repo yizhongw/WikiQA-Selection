@@ -3,8 +3,6 @@ Answer selection task based on WikiQA datatest.
 
 ## Dataset
 
----
-
 You can find the dataset at [WikiQA](https://www.microsoft.com/en-us/research/publication/wikiqa-a-challenge-dataset-for-open-domain-question-answering/)
 
 I remove the question-answer groups without any correct answers in test data.
@@ -15,16 +13,12 @@ For CNN model, I use pre-trained [Glove word embeddings](http://nlp.stanford.edu
 
 ## Task
 
----
-
 Given a question and a group of answer candidates, you should rank the candidates by the likelihood that it is the correct answer.
 
 The quality of the rank is evaluated by MRR and MAP, as implemented in `eval.py`
 
 
 ## Workflow
-
----
 
 1. Use preprocess.py to lemmatize the corpus and generate transformed train data.
 
