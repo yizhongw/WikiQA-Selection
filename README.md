@@ -26,25 +26,25 @@ The quality of the rank is evaluated by MRR and MAP, as implemented in `eval.py`
     
     * Word matching: 
     
-    ```python3 baseline.py --word_matching && python3 eval.py data/output/WikiQA-dev.rank data/raw/WikiQA-dev.tsv```
+        ```python3 baseline.py --word_matching && python3 eval.py data/output/WikiQA-dev.rank data/raw/WikiQA-dev.tsv```
     
     * Do nothing: 
     
-    ```python3 baseline.py --nothing && python3 eval.py data/output/WikiQA-dev.rank data/raw/WikiQA-dev.tsv```
+        ```python3 baseline.py --nothing && python3 eval.py data/output/WikiQA-dev.rank data/raw/WikiQA-dev.tsv```
     
 3. Try CNN models using main.py:
 
     * Prepare data_helper: 
     
-    ```python3 main.py --prepare```
+        ```python3 main.py --prepare```
     
     * Train cnn model: 
     
-    ```python3 main.py --train```
+        ```python3 main.py --train```
     
     * Generate the final rank for test data: 
     
-    ```python3 main.py --test```
+        ```python3 main.py --test```
     
     
     
