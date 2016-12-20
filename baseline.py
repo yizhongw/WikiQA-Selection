@@ -27,5 +27,18 @@ def do_nothing(test_file, output_file):
         for sample, rank in get_final_rank(samples):
             fout.write('{}\t{}\t{}\n'.format(sample.q_id, sample.a_id, rank))
 
+
+def parse_args():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--word_matching', action='store_true')
+    parser.add_argument('--nothing', action='store_true')
+    return parser.parse_args()
+
+
 if __name__ == '__main__':
-    word_matching_rank('data/lemmatized/WikiQA-test.tsv', 'data/output/WikiQA-test.rank')
+    args = parse_args()
+    if args.word_matching:
+        word_matching_rank('data/lemmatized/WikiQA-dev.tsv', 'data/output/WikiQA-dev.rank')
+    if args.nothing:
+        do_nothing('data/lemmatized/WikiQA-dev.tsv', 'data/output/WikiQA-dev.rank')
